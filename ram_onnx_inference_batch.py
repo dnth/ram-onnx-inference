@@ -1,6 +1,7 @@
 import os
 import time
 
+import cupy as cp
 import numpy as np
 import onnxruntime as ort
 import pandas as pd
@@ -8,7 +9,7 @@ from PIL import Image
 from tqdm.auto import tqdm
 
 
-def transform_numpy(images):
+def transforms(images):
     transformed_images = []
     for image in images:
         image = image.convert("RGB")
@@ -17,11 +18,14 @@ def transform_numpy(images):
         img_np = img_np.transpose(2, 0, 1)
         transformed_images.append(img_np)
 
-    batch = np.stack(transformed_images)
-    mean = np.array([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1)
-    std = np.array([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1)
+    # Move operations to GPU
+    batch = cp.array(transformed_images)
+    mean = cp.array([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1)
+    std = cp.array([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1)
     batch = (batch - mean) / std
-    return batch.astype(np.float32)
+
+    # Move result back to CPU
+    return cp.asnumpy(batch.astype(cp.float32))
 
 
 def postprocess(output, tag_list, tag_list_chinese):
@@ -86,7 +90,7 @@ def process_batch(image_paths, batch_size):
         batch = image_paths[i : i + batch_size]
         images = [Image.open(path) for path in batch]
 
-        transformed_batch = transform_numpy(images)
+        transformed_batch = transforms(images)
 
         start_time = time.time()
         output = session.run([output_name], {input_name: transformed_batch})
