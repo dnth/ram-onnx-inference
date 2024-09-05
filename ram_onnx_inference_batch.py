@@ -14,32 +14,28 @@ def transforms(images):
     for image in images:
         image = image.convert("RGB")
         image = image.resize((384, 384), Image.BILINEAR)
-        img_np = np.array(image).astype(np.float32) / 255.0
-        img_np = img_np.transpose(2, 0, 1)
-        transformed_images.append(img_np)
+        img_cp = cp.asarray(image).astype(cp.float32) / 255.0
+        img_cp = cp.transpose(img_cp, (2, 0, 1))
+        transformed_images.append(img_cp)
 
-    # Move operations to GPU
-    batch = cp.array(transformed_images)
-    mean = cp.array([0.485, 0.456, 0.406]).reshape(1, 3, 1, 1)
-    std = cp.array([0.229, 0.224, 0.225]).reshape(1, 3, 1, 1)
+    batch = cp.stack(transformed_images)
+    mean = cp.array([0.485, 0.456, 0.406], dtype=cp.float32).reshape(1, 3, 1, 1)
+    std = cp.array([0.229, 0.224, 0.225], dtype=cp.float32).reshape(1, 3, 1, 1)
     batch = (batch - mean) / std
 
-    # Move result back to CPU
-    return cp.asnumpy(batch.astype(cp.float32))
+    return cp.asnumpy(batch).astype(np.float32)
 
 
 def postprocess(output, tag_list, tag_list_chinese):
-    tags = output[0]
+    tags = cp.asarray(output[0])
     tag_english = []
     tag_chinese = []
     for b in range(tags.shape[0]):
-        index = np.argwhere(tags[b] == 1).flatten()
+        index = cp.asnumpy(cp.argwhere(tags[b] == 1).flatten())
         token = np.array(tag_list)[index]
         tag_english.append(token.tolist())
-        # tag_english.append(" | ".join(token))
         token_chinese = np.array(tag_list_chinese)[index]
         tag_chinese.append(token_chinese.tolist())
-        # tag_chinese.append(" | ".join(token_chinese))
     return tag_english, tag_chinese
 
 
