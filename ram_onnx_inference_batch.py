@@ -4,8 +4,6 @@ import time
 import numpy as np
 import onnxruntime as ort
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 from PIL import Image
 from tqdm.auto import tqdm
 
@@ -49,7 +47,6 @@ with open("data/ram_tag_list_chinese.txt", "r", encoding="utf-8") as f:
 
 # Create ONNX session
 model_path = "ram.onnx"
-# provider = "TensorrtExecutionProvider"
 providers = [
     (
         "TensorrtExecutionProvider",
@@ -64,13 +61,13 @@ providers = [
             "trt_min_subgraph_size": 1,
             "trt_builder_optimization_level": 5,
             "trt_timing_cache_enable": True,
-            "trt_dla_enable": True,
-            "trt_dla_core": 0,
         },
     ),
     "CUDAExecutionProvider",
     "CPUExecutionProvider",
 ]
+
+
 session = ort.InferenceSession(model_path, providers=providers)
 
 input_name = session.get_inputs()[0].name
