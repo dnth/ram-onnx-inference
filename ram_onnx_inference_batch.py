@@ -28,15 +28,17 @@ def transform_numpy(images):
 
 def postprocess(output, tag_list, tag_list_chinese):
     tags = output[0]
-    tag_output = []
-    tag_output_chinese = []
+    tag_english = []
+    tag_chinese = []
     for b in range(tags.shape[0]):
         index = np.argwhere(tags[b] == 1).flatten()
         token = np.array(tag_list)[index]
-        tag_output.append(" | ".join(token))
+        tag_english.append(token.tolist())
+        # tag_english.append(" | ".join(token))
         token_chinese = np.array(tag_list_chinese)[index]
-        tag_output_chinese.append(" | ".join(token_chinese))
-    return tag_output, tag_output_chinese
+        tag_chinese.append(token_chinese.tolist())
+        # tag_chinese.append(" | ".join(token_chinese))
+    return tag_english, tag_chinese
 
 
 # Load tag lists
@@ -53,24 +55,29 @@ providers = [
         "TensorrtExecutionProvider",
         {
             "device_id": 0,
-            "trt_max_workspace_size": 2147483648,  # 2GB
+            "trt_max_workspace_size": 8589934592,
             "trt_fp16_enable": True,
             "trt_engine_cache_enable": True,
             "trt_engine_cache_path": "./trt_cache",
-            "trt_force_sequential_engine_build": True,
+            "trt_force_sequential_engine_build": False,
+            "trt_max_partition_iterations": 10000,
+            "trt_min_subgraph_size": 1,
+            "trt_builder_optimization_level": 5,
+            "trt_timing_cache_enable": True,
+            "trt_dla_enable": True,
+            "trt_dla_core": 0,
         },
     ),
     "CUDAExecutionProvider",
     "CPUExecutionProvider",
 ]
-
 session = ort.InferenceSession(model_path, providers=providers)
 
 input_name = session.get_inputs()[0].name
 output_name = session.get_outputs()[0].name
 
 # warm up
-dummy_input = np.random.randn(8, 3, 384, 384).astype(np.float32)
+dummy_input = np.random.randn(1, 3, 384, 384).astype(np.float32)
 session.run([output_name], {input_name: dummy_input})
 
 
@@ -79,11 +86,8 @@ def process_batch(image_paths, batch_size):
     total_latency = 0
 
     for i in tqdm(range(0, len(image_paths), batch_size), desc="Processing batches"):
-        batch_paths = image_paths[i : i + batch_size]
-        images = [Image.open(path) for path in batch_paths]
-
-        print(f"Processing batch of {len(batch_paths)} images:")
-        print(batch_paths)
+        batch = image_paths[i : i + batch_size]
+        images = [Image.open(path) for path in batch]
 
         transformed_batch = transform_numpy(images)
 
@@ -91,24 +95,16 @@ def process_batch(image_paths, batch_size):
         output = session.run([output_name], {input_name: transformed_batch})
         end_time = time.time()
 
-        print(f"Output shape: {output[0].shape}")
-
         english_tags, chinese_tags = postprocess(output, tag_list, tag_list_chinese)
         inference_latency = (end_time - start_time) * 1000  # Convert to milliseconds
 
-        print(f"Number of tag sets: {len(english_tags)}")
-        print("English tags:")
-        for tags in english_tags:
-            print(tags)
-
-        for j, path in enumerate(batch_paths):
+        for j, path in enumerate(batch):
             results.append(
                 {
                     "filename": os.path.basename(path),
                     "english_tags": english_tags[j],
                     "chinese_tags": chinese_tags[j],
-                    "latency": inference_latency
-                    / len(batch_paths),  # Approximate per-image latency
+                    "latency": inference_latency / len(batch),
                 }
             )
 
@@ -130,13 +126,8 @@ def process_folder(folder_path, batch_size):
 
     # Convert results to a pandas DataFrame
     df = pd.DataFrame(results)
-
-    # Create a Parquet file name
     parquet_file = f"{folder_path.replace('/', '_')}_results.parquet"
-
-    # Save the DataFrame as a Parquet file
-    table = pa.Table.from_pandas(df)
-    pq.write_table(table, parquet_file)
+    df.to_parquet(parquet_file)
 
     print(f"Results saved to {parquet_file}")
 

@@ -13,7 +13,7 @@ def export_ram_to_onnx(
     device="cpu",
     quantize=False,
     simplify_model=False,
-    batch_size=None,  # New argument
+    batch_size=None,
 ):
     # Initialize the model
     model = ram(
@@ -45,13 +45,14 @@ def export_ram_to_onnx(
         )
 
         logits = self.fc(tagging_embed[0]).squeeze(-1)
+
         targets = torch.where(
             torch.sigmoid(logits) > self.class_threshold.to(image.device),
-            torch.ones_like(logits),  # Use ones_like to match logits shape
-            torch.zeros_like(logits),  # Use zeros_like to match logits shape
+            torch.tensor(1.0).to(image.device),
+            torch.zeros(self.num_class).to(image.device),
         )
 
-        return targets  # Return only the targets tensor
+        return targets
 
     # Replace the forward method
     model.forward = custom_forward.__get__(model)
@@ -107,13 +108,13 @@ def export_ram_to_onnx(
     )
     input_name = session.get_inputs()[0].name
     output_name = session.get_outputs()[0].name
-    result = session.run([output_name], {input_name: dummy_input.cpu().numpy()})
+    session.run([output_name], {input_name: dummy_input.cpu().numpy()})
     print("ONNX Runtime inference test successful.")
 
 
 if __name__ == "__main__":
     model_path = "data/ram_swin_large_14m.pth"
-    output_path = "ram_bs16.onnx"
+    output_path = "ram.onnx"
     export_ram_to_onnx(
-        model_path, output_path, quantize=False, simplify_model=True, batch_size=16
+        model_path, output_path, quantize=False, simplify_model=True, batch_size=1
     )
