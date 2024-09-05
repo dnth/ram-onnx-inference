@@ -36,7 +36,7 @@ with open("data/ram_tag_list_chinese.txt", "r", encoding="utf-8") as f:
     tag_list_chinese = [line.strip() for line in f.readlines()]
 
 # Load and preprocess the image
-image_path = "image_test_ram.jpg"
+image_path = "sample_images/0a8caaad03cfd733.jpg"
 image = Image.open(image_path)
 
 transformed_image = transform_numpy(image)
@@ -44,8 +44,23 @@ transformed_image = np.expand_dims(transformed_image, axis=0)
 
 # Create ONNX session
 model_path = "ram.onnx"
-provider = "TensorrtExecutionProvider"  # Change to "CPUExecutionProvider" if needed
-session = ort.InferenceSession(model_path, providers=[provider])
+providers = [
+    (
+        "TensorrtExecutionProvider",
+        {
+            "device_id": 0,
+            "trt_max_workspace_size": 2147483648,  # 2GB
+            "trt_fp16_enable": True,
+            "trt_engine_cache_enable": True,
+            "trt_engine_cache_path": "./trt_cache",
+            "trt_force_sequential_engine_build": True,
+        },
+    ),
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider",
+]
+
+session = ort.InferenceSession(model_path, providers=providers)
 
 # Run inference
 input_name = session.get_inputs()[0].name

@@ -112,8 +112,8 @@ def export_ram_to_onnx(
 
 
 if __name__ == "__main__":
-    model_path = "ram_swin_large_14m.pth"
-    output_path = "ram.onnx"
+    model_path = "data/ram_swin_large_14m.pth"
+    output_path = "ram_bs16.onnx"
     export_ram_to_onnx(
-        model_path, output_path, quantize=True, simplify_model=True, batch_size=None
+        model_path, output_path, quantize=False, simplify_model=True, batch_size=16
     )
