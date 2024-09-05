@@ -39,46 +39,35 @@ def postprocess(output, tag_list, tag_list_chinese):
     return tag_english, tag_chinese
 
 
-# Load tag lists
-with open("data/ram_tag_list.txt", "r") as f:
-    tag_list = [line.strip() for line in f.readlines()]
-with open("data/ram_tag_list_chinese.txt", "r", encoding="utf-8") as f:
-    tag_list_chinese = [line.strip() for line in f.readlines()]
-
-# Create ONNX session
-model_path = "ram.onnx"
-providers = [
-    (
-        "TensorrtExecutionProvider",
-        {
-            "device_id": 0,
-            "trt_max_workspace_size": 8589934592,
-            "trt_fp16_enable": True,
-            "trt_engine_cache_enable": True,
-            "trt_engine_cache_path": "./trt_cache",
-            "trt_force_sequential_engine_build": False,
-            "trt_max_partition_iterations": 10000,
-            "trt_min_subgraph_size": 1,
-            "trt_builder_optimization_level": 5,
-            "trt_timing_cache_enable": True,
-        },
-    ),
-    "CUDAExecutionProvider",
-    "CPUExecutionProvider",
-]
+def load_tag_lists(english_file, chinese_file):
+    with open(english_file, "r") as f:
+        tag_list = [line.strip() for line in f.readlines()]
+    with open(chinese_file, "r", encoding="utf-8") as f:
+        tag_list_chinese = [line.strip() for line in f.readlines()]
+    return tag_list, tag_list_chinese
 
 
-session = ort.InferenceSession(model_path, providers=providers)
-
-input_name = session.get_inputs()[0].name
-output_name = session.get_outputs()[0].name
-
-# warm up
-dummy_input = np.random.randn(1, 3, 384, 384).astype(np.float32)
-session.run([output_name], {input_name: dummy_input})
+def create_onnx_session(model_path, providers):
+    session = ort.InferenceSession(model_path, providers=providers)
+    input_name = session.get_inputs()[0].name
+    output_name = session.get_outputs()[0].name
+    return session, input_name, output_name
 
 
-def process_batch(image_paths, batch_size):
+def warm_up_session(session, input_name, output_name):
+    dummy_input = np.random.randn(1, 3, 384, 384).astype(np.float32)
+    session.run([output_name], {input_name: dummy_input})
+
+
+def process_images(
+    image_paths,
+    session,
+    input_name,
+    output_name,
+    tag_list,
+    tag_list_chinese,
+    batch_size,
+):
     results = []
     total_latency = 0
 
@@ -110,7 +99,15 @@ def process_batch(image_paths, batch_size):
     return results, total_latency
 
 
-def process_folder(folder_path, batch_size):
+def process_folder(
+    folder_path,
+    session,
+    input_name,
+    output_name,
+    tag_list,
+    tag_list_chinese,
+    batch_size,
+):
     image_files = [
         os.path.join(folder_path, f)
         for f in os.listdir(folder_path)
@@ -118,10 +115,17 @@ def process_folder(folder_path, batch_size):
     ]
 
     print(f"Found {len(image_files)} images in the folder.")
-    results, total_latency = process_batch(image_files, batch_size)
+    results, total_latency = process_images(
+        image_files,
+        session,
+        input_name,
+        output_name,
+        tag_list,
+        tag_list_chinese,
+        batch_size,
+    )
     avg_latency = total_latency / len(results) if results else 0
 
-    # Convert results to a pandas DataFrame
     df = pd.DataFrame(results)
     parquet_file = f"{folder_path.replace('/', '_')}_results.parquet"
     df.to_parquet(parquet_file)
@@ -132,9 +136,49 @@ def process_folder(folder_path, batch_size):
 
 
 if __name__ == "__main__":
+    # Configuration
     folder_path = "sample_images"
     batch_size = 1
-    results, avg_latency, parquet_file = process_folder(folder_path, batch_size)
+    model_path = "ram.onnx"
+    providers = [
+        (
+            "TensorrtExecutionProvider",
+            {
+                "device_id": 0,
+                "trt_max_workspace_size": 8589934592,
+                "trt_fp16_enable": True,
+                "trt_engine_cache_enable": True,
+                "trt_engine_cache_path": "./trt_cache",
+                "trt_force_sequential_engine_build": False,
+                "trt_max_partition_iterations": 10000,
+                "trt_min_subgraph_size": 1,
+                "trt_builder_optimization_level": 5,
+                "trt_timing_cache_enable": True,
+            },
+        ),
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider",
+    ]
+
+    # Load tag lists
+    tag_list, tag_list_chinese = load_tag_lists(
+        "data/ram_tag_list.txt", "data/ram_tag_list_chinese.txt"
+    )
+
+    # Create and warm up ONNX session
+    session, input_name, output_name = create_onnx_session(model_path, providers)
+    warm_up_session(session, input_name, output_name)
+
+    # Process folder
+    results, avg_latency, parquet_file = process_folder(
+        folder_path,
+        session,
+        input_name,
+        output_name,
+        tag_list,
+        tag_list_chinese,
+        batch_size,
+    )
 
     print(f"Processed {len(results)} images")
     print(f"Average inference latency: {avg_latency:.2f} ms")
