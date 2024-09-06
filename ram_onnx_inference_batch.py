@@ -1,5 +1,6 @@
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import cupy as cp
 import numpy as np
@@ -7,6 +8,13 @@ import onnxruntime as ort
 import pandas as pd
 from PIL import Image
 from tqdm.auto import tqdm
+
+# Constants for tag lists
+TAG_LIST = [line.strip() for line in open("data/ram_tag_list.txt", "r")]
+TAG_LIST_CHINESE = [
+    line.strip()
+    for line in open("data/ram_tag_list_chinese.txt", "r", encoding="utf-8")
+]
 
 
 def transforms(image):
@@ -22,20 +30,12 @@ def transforms(image):
     return cp.expand_dims(img_cp, axis=0)
 
 
-def postprocess(output, tag_list, tag_list_chinese):
+def postprocess(output):
     tags = cp.asarray(output[0][0])
     index = cp.where(tags == 1)[0].get()
-    tag_english = [tag_list[i] for i in index]
-    tag_chinese = [tag_list_chinese[i] for i in index]
+    tag_english = [TAG_LIST[i] for i in index]
+    tag_chinese = [TAG_LIST_CHINESE[i] for i in index]
     return tag_english, tag_chinese
-
-
-def load_tag_lists(english_file, chinese_file):
-    with open(english_file, "r") as f:
-        tag_list = [line.strip() for line in f.readlines()]
-    with open(chinese_file, "r", encoding="utf-8") as f:
-        tag_list_chinese = [line.strip() for line in f.readlines()]
-    return tag_list, tag_list_chinese
 
 
 def create_onnx_session(model_path, providers):
@@ -50,41 +50,43 @@ def warm_up_session(session, input_name, output_name):
     session.run([output_name], {input_name: dummy_input})
 
 
-def process_images(
-    image_paths,
-    session,
-    input_name,
-    output_name,
-    tag_list,
-    tag_list_chinese,
-    batch_size,
-):
+def process_single_image(path, session, input_name, output_name):
+    image = Image.open(path)
+    transformed_image = transforms(image)
+    output = session.run([output_name], {input_name: cp.asnumpy(transformed_image)})
+    english_tags, chinese_tags = postprocess(output)
+    return {
+        "filename": os.path.basename(path),
+        "english_tags": english_tags,
+        "chinese_tags": chinese_tags,
+    }
+
+
+def process_images(image_paths, session, input_name, output_name, batch_size):
     results = []
-    total_latency = 0
+    start_time = time.time()
+    with ThreadPoolExecutor(max_workers=batch_size) as executor:
+        future_to_path = {
+            executor.submit(
+                process_single_image,
+                path,
+                session,
+                input_name,
+                output_name,
+            ): path
+            for path in image_paths
+        }
 
-    for path in tqdm(image_paths, desc="Processing images"):
-        image = Image.open(path)
-        transformed_image = transforms(image)
-
-        start_time = time.time()
-        output = session.run([output_name], {input_name: cp.asnumpy(transformed_image)})
-        end_time = time.time()
-
-        english_tags, chinese_tags = postprocess(output, tag_list, tag_list_chinese)
-        inference_latency = (end_time - start_time) * 1000  # Convert to milliseconds
-
-        results.append(
-            {
-                "filename": os.path.basename(path),
-                "english_tags": english_tags,
-                "chinese_tags": chinese_tags,
-                "latency": inference_latency,
-            }
-        )
-
-        total_latency += inference_latency
-
-    return results, total_latency
+        for future in tqdm(
+            as_completed(future_to_path),
+            total=len(image_paths),
+            desc="Processing images",
+        ):
+            result = future.result()
+            results.append(result)
+    end_time = time.time()
+    total_inference_time = end_time - start_time
+    return results, total_inference_time
 
 
 def process_folder(
@@ -92,8 +94,6 @@ def process_folder(
     session,
     input_name,
     output_name,
-    tag_list,
-    tag_list_chinese,
     batch_size,
 ):
     image_files = [
@@ -103,16 +103,14 @@ def process_folder(
     ]
 
     print(f"Found {len(image_files)} images in the folder.")
-    results, total_latency = process_images(
+    results, total_inference_time = process_images(
         image_files,
         session,
         input_name,
         output_name,
-        tag_list,
-        tag_list_chinese,
         batch_size,
     )
-    avg_latency = total_latency / len(results) if results else 0
+    avg_inference_time = total_inference_time / len(results) if results else 0
 
     df = pd.DataFrame(results)
     parquet_file = f"{folder_path.replace('/', '_')}_results.parquet"
@@ -120,13 +118,13 @@ def process_folder(
 
     print(f"Results saved to {parquet_file}")
 
-    return results, avg_latency, parquet_file
+    return results, avg_inference_time, total_inference_time, parquet_file
 
 
 if __name__ == "__main__":
     # Configuration
     folder_path = "sample_images"
-    batch_size = 1
+    batch_size = 16
     model_path = "ram.onnx"
     providers = [
         (
@@ -148,26 +146,20 @@ if __name__ == "__main__":
         "CPUExecutionProvider",
     ]
 
-    # Load tag lists
-    tag_list, tag_list_chinese = load_tag_lists(
-        "data/ram_tag_list.txt", "data/ram_tag_list_chinese.txt"
-    )
-
     # Create and warm up ONNX session
     session, input_name, output_name = create_onnx_session(model_path, providers)
     warm_up_session(session, input_name, output_name)
 
     # Process folder
-    results, avg_latency, parquet_file = process_folder(
+    results, avg_inference_time, total_inference_time, parquet_file = process_folder(
         folder_path,
         session,
         input_name,
         output_name,
-        tag_list,
-        tag_list_chinese,
         batch_size,
     )
 
     print(f"Processed {len(results)} images")
-    print(f"Average inference latency: {avg_latency:.2f} ms")
+    print(f"Total inference time: {total_inference_time:.4f} seconds")
+    print(f"Average inference time per image: {avg_inference_time * 1000:.4f} ms")
     print(f"Results saved to {parquet_file}")
