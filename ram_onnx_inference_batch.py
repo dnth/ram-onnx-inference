@@ -102,7 +102,7 @@ if __name__ == "__main__":
     # Configuration
     folder_path = "sample_images"
     num_workers = 8
-    model_path = "ram.onnx"
+    model_path = "ram_plus.onnx"
     providers = [
         (
             "TensorrtExecutionProvider",
