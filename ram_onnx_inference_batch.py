@@ -63,9 +63,9 @@ def process_single_image(path, session, input_name, output_name):
     }
 
 
-def process_images(image_paths, session, input_name, output_name, batch_size):
+def process_images(image_paths, session, input_name, output_name, num_workers):
     results = []
-    with ThreadPoolExecutor(max_workers=batch_size) as executor:
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
         future_to_path = {
             executor.submit(
                 process_single_image,
@@ -90,7 +90,7 @@ def process_images(image_paths, session, input_name, output_name, batch_size):
 if __name__ == "__main__":
     # Configuration
     folder_path = "sample_images"
-    batch_size = 16
+    num_workers = 16
     model_path = "ram.onnx"
     providers = [
         (
@@ -131,7 +131,7 @@ if __name__ == "__main__":
         session,
         input_name,
         output_name,
-        batch_size,
+        num_workers,
     )
     end_time = time.time()
 
