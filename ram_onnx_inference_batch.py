@@ -9,33 +9,24 @@ from PIL import Image
 from tqdm.auto import tqdm
 
 
-def transforms(images):
-    transformed_images = []
-    for image in images:
-        image = image.convert("RGB")
-        image = image.resize((384, 384), Image.BILINEAR)
-        img_cp = cp.asarray(image).astype(cp.float32) / 255.0
-        img_cp = cp.transpose(img_cp, (2, 0, 1))
-        transformed_images.append(img_cp)
+def transforms(image):
+    image = image.convert("RGB")
+    image = image.resize((384, 384), Image.BILINEAR)
+    img_cp = cp.array(np.array(image).astype(np.float32) / 255.0)
+    img_cp = cp.transpose(img_cp, (2, 0, 1))
 
-    batch = cp.stack(transformed_images)
-    mean = cp.array([0.485, 0.456, 0.406], dtype=cp.float32).reshape(1, 3, 1, 1)
-    std = cp.array([0.229, 0.224, 0.225], dtype=cp.float32).reshape(1, 3, 1, 1)
-    batch = (batch - mean) / std
+    mean = cp.array([0.485, 0.456, 0.406], dtype=cp.float32).reshape(3, 1, 1)
+    std = cp.array([0.229, 0.224, 0.225], dtype=cp.float32).reshape(3, 1, 1)
+    img_cp = (img_cp - mean) / std
 
-    return cp.asnumpy(batch).astype(np.float32)
+    return cp.expand_dims(img_cp, axis=0).astype(cp.float32)
 
 
 def postprocess(output, tag_list, tag_list_chinese):
-    tags = cp.asarray(output[0])
-    tag_english = []
-    tag_chinese = []
-    for b in range(tags.shape[0]):
-        index = cp.asnumpy(cp.argwhere(tags[b] == 1).flatten())
-        token = np.array(tag_list)[index]
-        tag_english.append(token.tolist())
-        token_chinese = np.array(tag_list_chinese)[index]
-        tag_chinese.append(token_chinese.tolist())
+    tags = cp.asarray(output[0][0])
+    index = cp.where(tags == 1)[0].get()
+    tag_english = [tag_list[i] for i in index]
+    tag_chinese = [tag_list_chinese[i] for i in index]
     return tag_english, tag_chinese
 
 
@@ -71,28 +62,25 @@ def process_images(
     results = []
     total_latency = 0
 
-    for i in tqdm(range(0, len(image_paths), batch_size), desc="Processing batches"):
-        batch = image_paths[i : i + batch_size]
-        images = [Image.open(path) for path in batch]
-
-        transformed_batch = transforms(images)
+    for path in tqdm(image_paths, desc="Processing images"):
+        image = Image.open(path)
+        transformed_image = transforms(image)
 
         start_time = time.time()
-        output = session.run([output_name], {input_name: transformed_batch})
+        output = session.run([output_name], {input_name: cp.asnumpy(transformed_image)})
         end_time = time.time()
 
         english_tags, chinese_tags = postprocess(output, tag_list, tag_list_chinese)
         inference_latency = (end_time - start_time) * 1000  # Convert to milliseconds
 
-        for j, path in enumerate(batch):
-            results.append(
-                {
-                    "filename": os.path.basename(path),
-                    "english_tags": english_tags[j],
-                    "chinese_tags": chinese_tags[j],
-                    "latency": inference_latency / len(batch),
-                }
-            )
+        results.append(
+            {
+                "filename": os.path.basename(path),
+                "english_tags": english_tags,
+                "chinese_tags": chinese_tags,
+                "latency": inference_latency,
+            }
+        )
 
         total_latency += inference_latency
 
