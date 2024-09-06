@@ -12,14 +12,14 @@ from tqdm.auto import tqdm
 def transforms(image):
     image = image.convert("RGB")
     image = image.resize((384, 384), Image.BILINEAR)
-    img_cp = cp.array(np.array(image).astype(np.float32) / 255.0)
+    img_cp = cp.asarray(image).astype(cp.float32) / 255.0
     img_cp = cp.transpose(img_cp, (2, 0, 1))
 
     mean = cp.array([0.485, 0.456, 0.406], dtype=cp.float32).reshape(3, 1, 1)
     std = cp.array([0.229, 0.224, 0.225], dtype=cp.float32).reshape(3, 1, 1)
     img_cp = (img_cp - mean) / std
 
-    return cp.expand_dims(img_cp, axis=0).astype(cp.float32)
+    return cp.expand_dims(img_cp, axis=0)
 
 
 def postprocess(output, tag_list, tag_list_chinese):
