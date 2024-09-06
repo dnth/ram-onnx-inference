@@ -6,6 +6,7 @@ import cupy as cp
 import numpy as np
 import onnxruntime as ort
 import pandas as pd
+from loguru import logger
 from PIL import Image
 from tqdm.auto import tqdm
 
@@ -15,6 +16,9 @@ TAG_LIST_CHINESE = [
     line.strip()
     for line in open("data/ram_tag_list_chinese.txt", "r", encoding="utf-8")
 ]
+
+# Configure Loguru
+logger.add("ram_inference.log", rotation="10 MB")
 
 
 def transforms(image):
@@ -39,13 +43,17 @@ def postprocess(output):
 
 
 def create_onnx_session(model_path, providers):
+    logger.info(f"Creating ONNX session with model: {model_path}")
     session = ort.InferenceSession(model_path, providers=providers)
+    logger.info("ONNX session created successfully")
     input_name = session.get_inputs()[0].name
     output_name = session.get_outputs()[0].name
+    logger.info(f"Input name: {input_name}, Output name: {output_name}")
     return session, input_name, output_name
 
 
 def warm_up_session(session, input_name, output_name):
+    logger.info("Warming up ONNX session")
     dummy_input = np.random.randn(1, 3, 384, 384).astype(np.float32)
     for _ in range(3):
         session.run([output_name], {input_name: dummy_input})
@@ -64,6 +72,7 @@ def process_single_image(path, session, input_name, output_name):
 
 
 def process_images(image_paths, session, input_name, output_name, num_workers):
+    logger.info(f"Processing {len(image_paths)} images with {num_workers} workers")
     results = []
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         future_to_path = {
@@ -88,6 +97,8 @@ def process_images(image_paths, session, input_name, output_name, num_workers):
 
 
 if __name__ == "__main__":
+    logger.info("Starting RAM ONNX inference batch process")
+
     # Configuration
     folder_path = "sample_images"
     num_workers = 16
@@ -112,8 +123,12 @@ if __name__ == "__main__":
         "CPUExecutionProvider",
     ]
 
+    logger.info(f"Using providers: {providers}")
+
     # Create and warm up ONNX session
+    logger.info("Initializing ONNX session...")
     session, input_name, output_name = create_onnx_session(model_path, providers)
+    logger.info("ONNX session initialized")
     warm_up_session(session, input_name, output_name)
 
     # Get image files
@@ -122,7 +137,7 @@ if __name__ == "__main__":
         for f in os.listdir(folder_path)
         if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp"))
     ]
-    print(f"Found {len(image_files)} images in the folder.")
+    logger.info(f"Found {len(image_files)} images in the folder: {folder_path}")
 
     # Process images
     start_time = time.time()
@@ -143,7 +158,7 @@ if __name__ == "__main__":
     parquet_file = f"{folder_path.replace('/', '_')}_results.parquet"
     df.to_parquet(parquet_file)
 
-    print(f"Processed {len(results)} images")
-    print(f"Total inference time: {total_inference_time:.4f} seconds")
-    print(f"Average inference time per image: {avg_inference_time * 1000:.4f} ms")
-    print(f"Results saved to {parquet_file}")
+    logger.info(f"Processed {len(results)} images")
+    logger.info(f"Total inference time: {total_inference_time:.4f} seconds")
+    logger.info(f"Average inference time per image: {avg_inference_time * 1000:.4f} ms")
+    logger.info(f"Results saved to {parquet_file}")
