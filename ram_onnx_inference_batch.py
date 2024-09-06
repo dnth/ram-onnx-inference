@@ -155,7 +155,7 @@ if __name__ == "__main__":
 
     # Save results to parquet
     df = pd.DataFrame(results)
-    parquet_file = f"{folder_path.replace('/', '_')}_results.parquet"
+    parquet_file = "onnx_inference_results.parquet"
     df.to_parquet(parquet_file)
 
     logger.info(f"Processed {len(results)} images")
