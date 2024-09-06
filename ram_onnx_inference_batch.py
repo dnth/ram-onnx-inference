@@ -47,7 +47,8 @@ def create_onnx_session(model_path, providers):
 
 def warm_up_session(session, input_name, output_name):
     dummy_input = np.random.randn(1, 3, 384, 384).astype(np.float32)
-    session.run([output_name], {input_name: dummy_input})
+    for _ in range(3):
+        session.run([output_name], {input_name: dummy_input})
 
 
 def process_single_image(path, session, input_name, output_name):
@@ -64,7 +65,6 @@ def process_single_image(path, session, input_name, output_name):
 
 def process_images(image_paths, session, input_name, output_name, batch_size):
     results = []
-    start_time = time.time()
     with ThreadPoolExecutor(max_workers=batch_size) as executor:
         future_to_path = {
             executor.submit(
@@ -84,41 +84,7 @@ def process_images(image_paths, session, input_name, output_name, batch_size):
         ):
             result = future.result()
             results.append(result)
-    end_time = time.time()
-    total_inference_time = end_time - start_time
-    return results, total_inference_time
-
-
-def process_folder(
-    folder_path,
-    session,
-    input_name,
-    output_name,
-    batch_size,
-):
-    image_files = [
-        os.path.join(folder_path, f)
-        for f in os.listdir(folder_path)
-        if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp"))
-    ]
-
-    print(f"Found {len(image_files)} images in the folder.")
-    results, total_inference_time = process_images(
-        image_files,
-        session,
-        input_name,
-        output_name,
-        batch_size,
-    )
-    avg_inference_time = total_inference_time / len(results) if results else 0
-
-    df = pd.DataFrame(results)
-    parquet_file = f"{folder_path.replace('/', '_')}_results.parquet"
-    df.to_parquet(parquet_file)
-
-    print(f"Results saved to {parquet_file}")
-
-    return results, avg_inference_time, total_inference_time, parquet_file
+    return results
 
 
 if __name__ == "__main__":
@@ -150,14 +116,32 @@ if __name__ == "__main__":
     session, input_name, output_name = create_onnx_session(model_path, providers)
     warm_up_session(session, input_name, output_name)
 
-    # Process folder
-    results, avg_inference_time, total_inference_time, parquet_file = process_folder(
-        folder_path,
+    # Get image files
+    image_files = [
+        os.path.join(folder_path, f)
+        for f in os.listdir(folder_path)
+        if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp"))
+    ]
+    print(f"Found {len(image_files)} images in the folder.")
+
+    # Process images
+    start_time = time.time()
+    results = process_images(
+        image_files,
         session,
         input_name,
         output_name,
         batch_size,
     )
+    end_time = time.time()
+
+    total_inference_time = end_time - start_time
+    avg_inference_time = total_inference_time / len(results) if results else 0
+
+    # Save results to parquet
+    df = pd.DataFrame(results)
+    parquet_file = f"{folder_path.replace('/', '_')}_results.parquet"
+    df.to_parquet(parquet_file)
 
     print(f"Processed {len(results)} images")
     print(f"Total inference time: {total_inference_time:.4f} seconds")
