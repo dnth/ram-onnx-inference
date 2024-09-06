@@ -101,7 +101,7 @@ if __name__ == "__main__":
 
     # Configuration
     folder_path = "sample_images"
-    num_workers = 16
+    num_workers = 8
     model_path = "ram.onnx"
     providers = [
         (
