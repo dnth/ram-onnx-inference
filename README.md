@@ -42,6 +42,18 @@ Note: Adjust the paths according to your Conda environment location.
 
 
 Usage:
+
 ```bash
-python ram_onnx_inference_single_image.py
+python ram_onnx_inference_batch.py [options]
 ```
+
+Example:
+```bash
+python ram_onnx_inference_batch.py --folder_path /path/to/images --num_workers 4 --model_path /path/to/ram.onnx --output_file results.parquet
+```
+
+Options:
+- `--folder_path`: Path to the folder containing images (default: "sample_images")
+- `--num_workers`: Number of worker threads (default: 8)
+- `--model_path`: Path to the ONNX model file (default: "ram.onnx")
+- `--output_file`: Output file path for results (default: "onnx_inference_results.parquet")

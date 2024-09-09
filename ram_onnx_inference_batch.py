@@ -114,7 +114,6 @@ def parse_arguments():
         default="onnx_inference_results.parquet",
         help="Output file path for results",
     )
-    parser.add_argument("--log_file", default="ram_inference.log", help="Log file path")
     return parser.parse_args()
 
 
@@ -124,7 +123,7 @@ if __name__ == "__main__":
     logger.info("Starting RAM ONNX inference batch process")
 
     # Configure Loguru
-    logger.add(args.log_file, rotation="10 MB")
+    logger.add("ram_inference.log", rotation="10 MB")
 
     # Configuration
     providers = [
