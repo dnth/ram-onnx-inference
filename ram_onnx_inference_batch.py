@@ -1,3 +1,4 @@
+import argparse
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -10,14 +11,12 @@ from loguru import logger
 from PIL import Image
 from tqdm.auto import tqdm
 
-# Constants for tag lists
 TAG_LIST = [line.strip() for line in open("data/ram_tag_list.txt", "r")]
 TAG_LIST_CHINESE = [
     line.strip()
     for line in open("data/ram_tag_list_chinese.txt", "r", encoding="utf-8")
 ]
 
-# Configure Loguru
 logger.add("ram_inference.log", rotation="10 MB")
 
 
@@ -30,8 +29,9 @@ def transforms(image):
     mean = cp.array([0.485, 0.456, 0.406], dtype=cp.float32).reshape(3, 1, 1)
     std = cp.array([0.229, 0.224, 0.225], dtype=cp.float32).reshape(3, 1, 1)
     img_cp = (img_cp - mean) / std
+    img_cp = cp.expand_dims(img_cp, axis=0)  # Add batch dimension
 
-    return cp.expand_dims(img_cp, axis=0)
+    return img_cp
 
 
 def postprocess(output):
@@ -96,13 +96,37 @@ def process_images(image_paths, session, input_name, output_name, num_workers):
     return results
 
 
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="RAM ONNX inference batch process")
+    parser.add_argument(
+        "--folder_path",
+        default="sample_images",
+        help="Path to the folder containing images",
+    )
+    parser.add_argument(
+        "--num_workers", type=int, default=8, help="Number of worker threads"
+    )
+    parser.add_argument(
+        "--model_path", default="ram.onnx", help="Path to the ONNX model file"
+    )
+    parser.add_argument(
+        "--output_file",
+        default="onnx_inference_results.parquet",
+        help="Output file path for results",
+    )
+    parser.add_argument("--log_file", default="ram_inference.log", help="Log file path")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    args = parse_arguments()
+
     logger.info("Starting RAM ONNX inference batch process")
 
+    # Configure Loguru
+    logger.add(args.log_file, rotation="10 MB")
+
     # Configuration
-    folder_path = "sample_images"
-    num_workers = 8
-    model_path = "ram_plus.onnx"
     providers = [
         (
             "TensorrtExecutionProvider",
@@ -127,17 +151,17 @@ if __name__ == "__main__":
 
     # Create and warm up ONNX session
     logger.info("Initializing ONNX session...")
-    session, input_name, output_name = create_onnx_session(model_path, providers)
+    session, input_name, output_name = create_onnx_session(args.model_path, providers)
     logger.info("ONNX session initialized")
     warm_up_session(session, input_name, output_name)
 
     # Get image files
     image_files = [
-        os.path.join(folder_path, f)
-        for f in os.listdir(folder_path)
+        os.path.join(args.folder_path, f)
+        for f in os.listdir(args.folder_path)
         if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp"))
     ]
-    logger.info(f"Found {len(image_files)} images in the folder: {folder_path}")
+    logger.info(f"Found {len(image_files)} images in the folder: {args.folder_path}")
 
     # Process images
     start_time = time.time()
@@ -146,7 +170,7 @@ if __name__ == "__main__":
         session,
         input_name,
         output_name,
-        num_workers,
+        args.num_workers,
     )
     end_time = time.time()
 
@@ -155,10 +179,9 @@ if __name__ == "__main__":
 
     # Save results to parquet
     df = pd.DataFrame(results)
-    parquet_file = "onnx_inference_results.parquet"
-    df.to_parquet(parquet_file)
+    df.to_parquet(args.output_file)
 
     logger.info(f"Processed {len(results)} images")
     logger.info(f"Total inference time: {total_inference_time:.4f} seconds")
     logger.info(f"Average inference time per image: {avg_inference_time * 1000:.4f} ms")
-    logger.info(f"Results saved to {parquet_file}")
+    logger.info(f"Results saved to {args.output_file}")
